@@ -260,3 +260,105 @@ int main() {
 
 该示例代码创建了一个页表目录，然后调用 `map` 函数将虚拟地址 `0x80000000` 映射到物理地址 `0x10000000`，权限为可读可写。最后，通过 `PA` 宏计算出虚拟地址 `0x80000123` 对应的物理地址，并输出到控制台。
 
+在 RISC-V 64 位架构中，页表机制是用来实现虚拟内存管理的。它将虚拟地址映射到物理地址，以便程序可以访问物理内存。RISC-V 64 位架构使用三级页表机制，其中每个页表项是 8 字节长，每个页表可以包含 512 个页表项。下面是一个使用 C 语言实现的简单的三级页表机制。
+
+```c
+#include <stdint.h>
+#include <stdlib.h>
+
+// 定义页大小为 4KB
+#define PAGE_SIZE 4096
+
+// 页表项
+typedef struct {
+    uint64_t ppn:44;  // 物理页号，44 位
+    uint64_t rsw:10;  // 保留位，10 位
+    uint64_t flags:10;  // 标志位，10 位
+} pte_t;
+
+// 页表
+typedef struct {
+    pte_t ptes[512];  // 512 个页表项
+} pt_t;
+
+// 三级页表
+typedef struct {
+    pt_t* pts[512];  // 512 个页表指针
+} pmt_t;
+
+// 初始化页表项
+void init_pte(pte_t* pte, uint64_t ppn, uint64_t flags) {
+    pte->ppn = ppn;
+    pte->rsw = 0;
+    pte->flags = flags;
+}
+
+// 初始化页表
+pt_t* init_pt() {
+    pt_t* pt = (pt_t*)malloc(sizeof(pt_t));
+    for (int i = 0; i < 512; i++) {
+        init_pte(&(pt->ptes[i]), 0, 0);
+    }
+    return pt;
+}
+
+// 初始化三级页表
+pmt_t* init_pmt() {
+    pmt_t* pmt = (pmt_t*)malloc(sizeof(pmt_t));
+    for (int i = 0; i < 512; i++) {
+        pmt->pts[i] = NULL;
+    }
+    return pmt;
+}
+
+// 获取页表项
+pte_t* get_pte(pmt_t* pmt, uint64_t vpn) {
+    uint64_t idx1 = (vpn >> 27) & 0x1ff;  // VPN[63:28]
+    uint64_t idx2 = (vpn >> 18) & 0x1ff;  // VPN[27:19]
+    uint64_t idx3 = (vpn >> 9) & 0x1ff;  // VPN[18:10]
+    if (pmt->pts[idx1] == NULL) {
+        pmt->pts[idx1] = init_pt();
+    }
+    pt_t* pt = pmt->pts[idx1];
+    if (pt->ptes[idx2].ppn == 0) {
+        pt->ptes[idx2].ppn = (uint64_t)malloc(PAGE_SIZE);
+        init_pte(&(pt->ptes[idx2]), pt->ptes[idx2].ppn >> 12, 0);
+    }
+    pt = (pt_t*)pt->ptes[idx2].ppn;
+    return &(pt->ptes[idx3]);
+}
+
+// 映射虚拟地址到物理地址
+void map(pmt_t* pmt, uint64_t vpn, uint64_t ppn, uint64_t flags) {
+    pte_t* pte = get_pte(pmt, vpn);
+    pte->ppn = ppn >> 12;
+    pte->flags = flags;
+}
+
+// 读取虚拟地址
+uint64_t read(pmt_t* pmt, uint64_t va) {
+    uint64_t vpn = va >> 12;
+    uint64_t offset = va & 0xfff;
+    pte_t* pte = get_pte(pmt, vpn);
+    if (pte->ppn == 0) {
+        return 0;
+    }
+    uint64_t pa = (pte->ppn << 12) | offset;
+    return *((uint64_t*)pa);
+}
+
+// 写入虚拟地址
+void write(pmt_t* pmt, uint64_t va, uint64_t data) {
+    uint64_t vpn = va >> 12;
+    uint64_t offset = va & 0xfff;
+    pte_t* pte = get_pte(pmt, vpn);
+    if (pte->ppn == 0) {
+        pte->ppn = (uint64_t)malloc(PAGE_SIZE);
+        init_pte(pte, pte->ppn >> 12, 0);
+    }
+    uint64_t pa = (pte->ppn << 12) | offset;
+    *((uint64_t*)pa) = data;
+}
+```
+
+这是一个简单的实现，它包括了初始化页表、获取页表项、映射虚拟地址到物理地址、读取虚拟地址、写入虚拟地址等功能。在使用时，需要先初始化一个三级页表，然后使用 `map()` 函数将虚拟地址映射到物理地址，然后就可以使用 `read()` 和 `write()` 函数读取和写入内存了。
